@@ -340,10 +340,33 @@ impl<'src> Justfile<'src> {
 
     if !context.config.no_dependencies {
       for Dependency { recipe, arguments } in recipe.dependencies.iter().take(recipe.priors) {
-        let arguments = arguments
-          .iter()
-          .map(|argument| evaluator.evaluate_expression(argument))
-          .collect::<RunResult<Vec<String>>>()?;
+        let mut rest = arguments.clone();
+        let mut arguments = Vec::new();
+
+        for parameter in &recipe.parameters {
+          if parameter.kind.is_variadic() {
+            for value in &rest {
+              let evaluated = evaluator.evaluate_expression(value)?;
+              if let Expression::Variable { .. } = value {
+                arguments.append(&mut shlex::split(&evaluated).unwrap_or_default());
+              } else {
+                arguments.push(evaluated);
+              }
+            }
+          } else if rest.is_empty() {
+            if let Some(ref default) = parameter.default {
+              arguments.push(evaluator.evaluate_expression(&default)?);
+            } else if parameter.kind == ParameterKind::Star {
+              arguments.push(String::new());
+            } else {
+              return Err(Error::Internal {
+                message: "missing argument with no parameter default".to_owned(),
+              });
+            }
+          } else {
+            arguments.push(evaluator.evaluate_expression(&rest.remove(0))?);
+          }
+        }
 
         Self::run_recipe(&arguments, context, ran, recipe, true)?;
       }

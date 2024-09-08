@@ -600,6 +600,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "shellexpand",
+ "shlex",
  "similar",
  "snafu",
  "strum",
