@@ -342,9 +342,10 @@ impl<'run, 'src> Parser<'run, 'src> {
           }
           Some(Keyword::Export) if self.next_are(&[Identifier, Identifier, ColonEquals]) => {
             self.presume_keyword(Keyword::Export)?;
-            items.push(Item::Assignment(
-              self.parse_assignment(true, take_attributes())?,
-            ));
+
+            if let Some(assignment) = self.parse_assignment(true, take_attributes())? {
+              items.push(Item::Assignment(assignment));
+            }
           }
           Some(Keyword::Unexport)
             if self.next_are(&[Identifier, Identifier, Eof])
@@ -435,9 +436,9 @@ impl<'run, 'src> Parser<'run, 'src> {
           }
           _ => {
             if self.next_are(&[Identifier, ColonEquals]) {
-              items.push(Item::Assignment(
-                self.parse_assignment(false, take_attributes())?,
-              ));
+              if let Some(assignment) = self.parse_assignment(false, take_attributes())? {
+                items.push(Item::Assignment(assignment));
+              }
             } else {
               let doc = pop_doc_comment(&mut items, eol_since_last_comment);
               items.push(Item::Recipe(self.parse_recipe(
@@ -506,24 +507,44 @@ impl<'run, 'src> Parser<'run, 'src> {
     &mut self,
     export: bool,
     attributes: AttributeSet<'src>,
-  ) -> CompileResult<'src, Assignment<'src>> {
+  ) -> CompileResult<'src, Option<Assignment<'src>>> {
     let name = self.parse_name()?;
     self.presume(ColonEquals)?;
     let value = self.parse_expression()?;
     self.expect_eol()?;
 
     let private = attributes.contains(AttributeDiscriminant::Private);
+    let unix = attributes.contains(AttributeDiscriminant::Unix);
+    let windows = attributes.contains(AttributeDiscriminant::Windows);
 
-    attributes.ensure_valid_attributes("Assignment", *name, &[AttributeDiscriminant::Private])?;
+    attributes.ensure_valid_attributes(
+      "Assignment",
+      *name,
+      &[
+        AttributeDiscriminant::Private,
+        AttributeDiscriminant::Unix,
+        AttributeDiscriminant::Windows,
+      ],
+    )?;
 
-    Ok(Assignment {
-      constant: false,
-      export,
-      file_depth: self.file_depth,
-      name,
-      private: private || name.lexeme().starts_with('_'),
-      value,
-    })
+    let assign = match (unix, windows) {
+      (true, _) => target::family() == "unix",
+      (_, true) => target::family() == "windows",
+      _ => true,
+    };
+
+    if assign {
+      Ok(Some(Assignment {
+        constant: false,
+        export,
+        file_depth: self.file_depth,
+        name,
+        private: private || name.lexeme().starts_with('_'),
+        value,
+      }))
+    } else {
+      Ok(None)
+    }
   }
 
   /// Parse an expression, e.g. `1 + 2`
